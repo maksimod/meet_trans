@@ -1,0 +1,13 @@
+{
+  "manifest_version": 3,
+  "name": "Google Meet Subtitles Logger",
+  "version": "1.0",
+  "description": "Logs Google Meet subtitles to the console",
+  "content_scripts": [
+    {
+      "matches": ["https://meet.google.com/*"],
+      "js": ["content.js"]
+    }
+  ],
+  "permissions": ["activeTab"]
+} 

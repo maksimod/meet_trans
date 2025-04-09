@@ -1,0 +1,240 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Google Meet Subtitles Test Page</title>
+    <style>
+        body {
+            font-family: 'Roboto', Arial, sans-serif;
+            background-color: #202124;
+            color: white;
+            margin: 0;
+            padding: 20px;
+        }
+        .meet-layout {
+            width: 100%;
+            max-width: 1200px;
+            margin: 0 auto;
+            position: relative;
+            height: 80vh;
+            border: 1px solid #5f6368;
+            border-radius: 8px;
+            overflow: hidden;
+        }
+        .video-area {
+            width: 100%;
+            height: 100%;
+            background-color: #3c4043;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 24px;
+        }
+        .controls-bar {
+            position: absolute;
+            bottom: 0;
+            left: 0;
+            right: 0;
+            background-color: #202124;
+            padding: 16px;
+            display: flex;
+            justify-content: center;
+            gap: 20px;
+        }
+        .control-button {
+            width: 40px;
+            height: 40px;
+            border-radius: 50%;
+            background-color: #3c4043;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            cursor: pointer;
+        }
+        .control-button:hover {
+            background-color: #5f6368;
+        }
+        .control-button.active {
+            background-color: #8ab4f8;
+            color: #202124;
+        }
+        .subtitles-container {
+            position: absolute;
+            bottom: 80px;
+            left: 0;
+            right: 0;
+            text-align: center;
+            padding: 10px;
+        }
+        .subtitles {
+            display: inline-block;
+            background-color: rgba(0, 0, 0, 0.6);
+            padding: 8px 12px;
+            border-radius: 4px;
+            font-size: 18px;
+            max-width: 80%;
+        }
+        .CNusmb {
+            font-size: 18px;
+            color: white;
+            padding: 8px 16px;
+            background-color: rgba(0, 0, 0, 0.6);
+            border-radius: 4px;
+            margin: 0 auto;
+            max-width: 80%;
+            text-align: center;
+        }
+        .hidden {
+            display: none;
+        }
+        .subtitle-panel {
+            margin-top: 20px;
+            padding: 16px;
+            background-color: #3c4043;
+            border-radius: 8px;
+        }
+        button {
+            background-color: #8ab4f8;
+            color: #202124;
+            border: none;
+            padding: 8px 16px;
+            border-radius: 4px;
+            cursor: pointer;
+            margin: 5px;
+        }
+        button:hover {
+            background-color: #aecbfa;
+        }
+        .debug {
+            margin-top: 20px;
+            font-family: monospace;
+            font-size: 14px;
+            padding: 10px;
+            background-color: #3c4043;
+            border-radius: 4px;
+            height: 150px;
+            overflow-y: auto;
+        }
+    </style>
+</head>
+<body>
+    <h1>Google Meet Subtitles Test Page</h1>
+    <p>This page simulates Google Meet subtitles for testing the extension.</p>
+    
+    <div class="meet-layout">
+        <div class="video-area">
+            Test Video Area
+        </div>
+        
+        <div class="subtitles-container">
+            <div class="CNusmb hidden" id="subtitle-element">This is a test subtitle</div>
+        </div>
+        
+        <div class="controls-bar">
+            <div class="control-button" title="Microphone">🎤</div>
+            <div class="control-button" title="Camera">📷</div>
+            <div class="control-button" id="cc-button" title="Closed Captions">CC</div>
+            <div class="control-button" title="Participants">👥</div>
+            <div class="control-button" title="Chat">💬</div>
+        </div>
+    </div>
+    
+    <div class="subtitle-panel">
+        <h2>Subtitle Test Panel</h2>
+        <p>Click the buttons below to simulate subtitles:</p>
+        
+        <button id="toggle-cc">Toggle Closed Captions</button>
+        <button id="send-subtitle">Show Test Subtitle</button>
+        <button id="send-random">Show Random Subtitle</button>
+        <button id="clear-subtitle">Clear Subtitle</button>
+        
+        <div class="debug" id="debug-output">
+            <div>Debug output will appear here</div>
+        </div>
+    </div>
+    
+    <script>
+        // Sample subtitles
+        const sampleSubtitles = [
+            "Hello, can you hear me?",
+            "I'd like to share my screen",
+            "Let me go through this presentation",
+            "Can everyone see my screen?",
+            "I think we need to discuss this further",
+            "What does everyone think about this approach?",
+            "Let's schedule a follow-up meeting",
+            "I'll send the meeting notes by email",
+            "Could you please repeat that?",
+            "Sorry, I was on mute"
+        ];
+        
+        // DOM elements
+        const ccButton = document.getElementById('cc-button');
+        const subtitleElement = document.getElementById('subtitle-element');
+        const toggleCcButton = document.getElementById('toggle-cc');
+        const sendSubtitleButton = document.getElementById('send-subtitle');
+        const sendRandomButton = document.getElementById('send-random');
+        const clearSubtitleButton = document.getElementById('clear-subtitle');
+        const debugOutput = document.getElementById('debug-output');
+        
+        // State
+        let ccEnabled = false;
+        let subtitleTimeout = null;
+        
+        // Functions
+        function toggleCC() {
+            ccEnabled = !ccEnabled;
+            ccButton.classList.toggle('active', ccEnabled);
+            log(`Closed captions ${ccEnabled ? 'enabled' : 'disabled'}`);
+            
+            if (!ccEnabled) {
+                clearSubtitle();
+            }
+        }
+        
+        function showSubtitle(text) {
+            if (!ccEnabled) {
+                log('Cannot show subtitle: CC is disabled');
+                return;
+            }
+            
+            clearTimeout(subtitleTimeout);
+            subtitleElement.textContent = text;
+            subtitleElement.classList.remove('hidden');
+            log(`Showing subtitle: "${text}"`);
+            
+            // Auto-hide subtitle after 5 seconds
+            subtitleTimeout = setTimeout(() => {
+                clearSubtitle();
+            }, 5000);
+        }
+        
+        function clearSubtitle() {
+            subtitleElement.classList.add('hidden');
+            clearTimeout(subtitleTimeout);
+            log('Subtitle cleared');
+        }
+        
+        function showRandomSubtitle() {
+            const randomIndex = Math.floor(Math.random() * sampleSubtitles.length);
+            showSubtitle(sampleSubtitles[randomIndex]);
+        }
+        
+        function log(message) {
+            const logEntry = document.createElement('div');
+            logEntry.textContent = `[${new Date().toLocaleTimeString()}] ${message}`;
+            debugOutput.appendChild(logEntry);
+            debugOutput.scrollTop = debugOutput.scrollHeight;
+        }
+        
+        // Event listeners
+        toggleCcButton.addEventListener('click', toggleCC);
+        sendSubtitleButton.addEventListener('click', () => showSubtitle('This is a test subtitle'));
+        sendRandomButton.addEventListener('click', showRandomSubtitle);
+        clearSubtitleButton.addEventListener('click', clearSubtitle);
+        ccButton.addEventListener('click', toggleCC);
+        
+        // Initialize
+        log('Test page loaded');
+    </script>
+</body>
+</html> 
