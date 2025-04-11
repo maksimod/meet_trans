@@ -26,6 +26,13 @@ console.log = function() {
 // Теперь запускаем оригинальное сообщение
 originalConsoleLog('Google Meet Subtitles Logger started');
 
+// Constants for subtitle processing
+const MIN_LENGTH = 10;                  // Минимальная длина для вывода 
+const BUFFER_DELAY = 1500;              // Задержка буфера (1.5 секунды)
+const MIN_LOG_INTERVAL = 1000;          // Минимальный интервал логирования
+const SENTENCE_ENDS = ['.', '!', '?', ';']; // Окончания предложений
+const SUBTITLE_CHECK_INTERVAL = 1000;   // Интервал для проверки субтитров
+
 // Track previously seen subtitles to avoid duplicates
 const seenSubtitles = new Set();
 let lastSubtitle = '';
@@ -34,13 +41,98 @@ let currentBuffer = '';
 let bufferTimer = null;
 let isProcessingSubtitles = false;
 
-// Constants for subtitle processing
-const MIN_LENGTH = 10;                // Минимальная длина для вывода 
-const BUFFER_DELAY = 1800;            // Задержка буфера (1.8 секунды)
-const MIN_LOG_INTERVAL = 800;         // Минимальный интервал логирования (0.8 сек)
-const SENTENCE_ENDS = ['.', '!', '?', ';']; // Окончания предложений
-const SUBTITLE_CHECK_INTERVAL = 1000; // Интервал для проверки субтитров (1 секунда)
-const MAX_SENTENCE_LENGTH = 200;      // Максимальная длина предложения для обработки
+// Буфер для накопления текущего предложения
+let sentenceBuffer = '';
+let sentenceBufferTimeout = null;
+
+// Process subtitle text
+function processSubtitleText(text) {
+  if (!text || text.trim() === '') return;
+  
+  // Очищаем ненужные префиксы
+  let cleanText = text;
+  if (cleanText.startsWith('You')) {
+    cleanText = cleanText.substring(3).trim();
+  }
+  
+  // Проверяем, реальные ли это субтитры
+  if (!isRealSubtitle(cleanText)) return;
+  
+  // Проверяем, если это полный дубликат последнего субтитра - пропускаем
+  if (cleanText === lastSubtitle) return;
+  
+  const now = Date.now();
+  
+  // Проверка - содержит ли текст знаки окончания предложения
+  const hasCompleteSentence = SENTENCE_ENDS.some(mark => cleanText.endsWith(mark));
+  
+  // Если currentBuffer пуст или новый текст содержит старый буфер - обновляем буфер
+  if (currentBuffer === '' || cleanText.includes(currentBuffer)) {
+    currentBuffer = cleanText;
+  }
+  
+  // Если прошло достаточно времени с последнего вывода или у нас есть завершенное предложение
+  if (now - lastLogTime > MIN_LOG_INTERVAL || hasCompleteSentence) {
+    // Очищаем предыдущий таймер, если он был
+    if (bufferTimer) {
+      clearTimeout(bufferTimer);
+      bufferTimer = null;
+    }
+    
+    if (hasCompleteSentence) {
+      // Если есть завершенное предложение - выводим сразу
+      const sentences = cleanText.split(/([.!?;])/).filter(s => s.trim().length > 0);
+      let output = '';
+      
+      // Собираем предложения с знаками препинания
+      for (let i = 0; i < sentences.length; i += 2) {
+        if (i + 1 < sentences.length) {
+          output = sentences[i] + sentences[i + 1];
+          if (output.length >= MIN_LENGTH && !seenSubtitles.has(output)) {
+            originalConsoleLog(SUBTITLE_PREFIX + output);
+            seenSubtitles.add(output);
+          }
+        } else {
+          output = sentences[i];
+          if (output.length >= MIN_LENGTH && !seenSubtitles.has(output)) {
+            originalConsoleLog(SUBTITLE_PREFIX + output);
+            seenSubtitles.add(output);
+          }
+        }
+      }
+      
+      // Сбрасываем буфер
+      currentBuffer = '';
+    } else {
+      // Иначе выводим то что есть в буфере
+      if (currentBuffer && currentBuffer.length >= MIN_LENGTH && !seenSubtitles.has(currentBuffer)) {
+        originalConsoleLog(SUBTITLE_PREFIX + currentBuffer);
+        seenSubtitles.add(currentBuffer);
+        
+        // Сбрасываем буфер
+        currentBuffer = '';
+      }
+    }
+    
+    lastLogTime = now;
+  } else {
+    // Если прошло мало времени с последнего вывода - устанавливаем таймер
+    if (bufferTimer) {
+      clearTimeout(bufferTimer);
+    }
+    
+    bufferTimer = setTimeout(() => {
+      if (currentBuffer && currentBuffer.length >= MIN_LENGTH && !seenSubtitles.has(currentBuffer)) {
+        originalConsoleLog(SUBTITLE_PREFIX + currentBuffer);
+        seenSubtitles.add(currentBuffer);
+      }
+      currentBuffer = '';
+      bufferTimer = null;
+    }, BUFFER_DELAY);
+  }
+  
+  lastSubtitle = cleanText;
+}
 
 // UI элементы, которые не должны распознаваться как субтитры
 const UI_ELEMENTS = [
@@ -57,7 +149,7 @@ const UI_ELEMENTS = [
   'Call ends', 'Switch', 'gmail', 'Apply', 'effect', 'Offer', 'Effects', 'soon',
   'maksumonka', 'comSwitch', 'isn\'t taking', 'Will end', 'Call will',
   'taking notes', 'not taking', 'taking note', 'enable', 'disable', 'caption',
-  'filter', 'layout', 'view', 'Raise hand', 'hand (ctrl', 'alt', 'fasteners'
+  'filter', 'layout', 'view'
 ];
 
 // Классы элементов, которые могут содержать субтитры
@@ -229,9 +321,6 @@ function isRealSubtitle(text) {
   // Слишком короткие тексты пропускаем (просто фрагменты слов)
   if (text.length < MIN_LENGTH) return false;
   
-  // Слишком длинные тексты тоже подозрительны
-  if (text.length > MAX_SENTENCE_LENGTH) return false;
-  
   // Субтитры обычно не содержат HTML-тегов
   if (text.includes('<') && text.includes('>')) return false;
   
@@ -247,136 +336,6 @@ function isRealSubtitle(text) {
   }
   
   return true;
-}
-
-// Новая улучшенная функция обработки субтитров
-function processSubtitleText(text) {
-  if (!text || text.trim() === '') return;
-  
-  // Очищаем ненужные префиксы
-  let cleanText = text;
-  if (cleanText.startsWith('You')) {
-    cleanText = cleanText.substring(3).trim();
-  }
-  
-  // Проверяем, реальные ли это субтитры
-  if (!isRealSubtitle(cleanText)) return;
-  
-  // Проверяем, если это полный дубликат последнего субтитра - пропускаем
-  if (cleanText === lastSubtitle) return;
-  
-  const now = Date.now();
-  
-  // Проверяем, заканчивается ли текст знаком окончания предложения
-  const isComplete = SENTENCE_ENDS.some(mark => cleanText.endsWith(mark));
-  
-  // Если предложение завершено, обрабатываем его сразу
-  if (isComplete) {
-    // Если есть таймер ожидания, отменяем его
-    if (bufferTimer) {
-      clearTimeout(bufferTimer);
-      bufferTimer = null;
-    }
-    
-    // Обрабатываем только если предложение достаточно длинное и новое
-    if (cleanText.length >= MIN_LENGTH && !seenSubtitles.has(cleanText)) {
-      originalConsoleLog(SUBTITLE_PREFIX + cleanText);
-      seenSubtitles.add(cleanText);
-      lastLogTime = now;
-    }
-    
-    // Сбрасываем текущий буфер
-    currentBuffer = '';
-  } 
-  // Если предложение не завершено
-  else {
-    // Если буфер пуст или новый текст включает буфер (расширяет его)
-    if (currentBuffer === '' || cleanText.includes(currentBuffer)) {
-      currentBuffer = cleanText;
-      
-      // Если есть активный таймер, сбрасываем его
-      if (bufferTimer) {
-        clearTimeout(bufferTimer);
-      }
-      
-      // Устанавливаем новый таймер для вывода буфера после задержки
-      bufferTimer = setTimeout(() => {
-        // Выводим буфер, только если он достаточно длинный и новый
-        if (currentBuffer && currentBuffer.length >= MIN_LENGTH && !seenSubtitles.has(currentBuffer)) {
-          originalConsoleLog(SUBTITLE_PREFIX + currentBuffer);
-          seenSubtitles.add(currentBuffer);
-          lastLogTime = Date.now();
-        }
-        currentBuffer = '';
-        bufferTimer = null;
-      }, BUFFER_DELAY);
-    }
-    // Если новый текст не включает буфер, но прошло достаточно времени с последнего вывода
-    else if (now - lastLogTime > MIN_LOG_INTERVAL) {
-      // Выводим текущий буфер, если он не пустой
-      if (currentBuffer && currentBuffer.length >= MIN_LENGTH && !seenSubtitles.has(currentBuffer)) {
-        originalConsoleLog(SUBTITLE_PREFIX + currentBuffer);
-        seenSubtitles.add(currentBuffer);
-      }
-      
-      // Начинаем новый буфер с текущим текстом
-      currentBuffer = cleanText;
-      
-      // Если есть активный таймер, сбрасываем его
-      if (bufferTimer) {
-        clearTimeout(bufferTimer);
-      }
-      
-      // Устанавливаем новый таймер
-      bufferTimer = setTimeout(() => {
-        if (currentBuffer && currentBuffer.length >= MIN_LENGTH && !seenSubtitles.has(currentBuffer)) {
-          originalConsoleLog(SUBTITLE_PREFIX + currentBuffer);
-          seenSubtitles.add(currentBuffer);
-          lastLogTime = Date.now();
-        }
-        currentBuffer = '';
-        bufferTimer = null;
-      }, BUFFER_DELAY);
-      
-      lastLogTime = now;
-    }
-  }
-  
-  lastSubtitle = cleanText;
-}
-
-// Разделяет текст на предложения по знакам окончания
-function splitIntoSentences(text) {
-  // Используем регулярное выражение для разделения по знакам окончания предложения
-  const sentences = [];
-  
-  // Разбираем текст на части по знакам препинания
-  const regex = /[.!?;]+/g;
-  let match;
-  let lastIndex = 0;
-  
-  // Находим все разделители предложений
-  while ((match = regex.exec(text)) !== null) {
-    const sentence = text.substring(lastIndex, match.index + match[0].length).trim();
-    
-    // Добавляем только если предложение не пустое
-    if (sentence && sentence.length >= MIN_LENGTH) {
-      sentences.push(sentence);
-    }
-    
-    lastIndex = match.index + match[0].length;
-  }
-  
-  // Добавляем последнюю часть текста, если она есть
-  if (lastIndex < text.length) {
-    const remainingText = text.substring(lastIndex).trim();
-    if (remainingText && remainingText.length >= MIN_LENGTH) {
-      sentences.push(remainingText);
-    }
-  }
-  
-  // Если после разделения нет предложений, возвращаем исходный текст
-  return sentences.length > 0 ? sentences : [text];
 }
 
 // Очистка старых субтитров периодически
@@ -588,7 +547,14 @@ function scanForSubtitles() {
   originalConsoleLog(`Scanning ${allElements.length} elements for subtitles...`);
   
   let foundSubtitles = false;
-  let observerCount = 0;
+  let newObservers = 0;
+  
+  // Ограничение на количество наблюдателей
+  if (observerCount > 150) {
+    originalConsoleLog("Too many observers, skipping scan");
+    setTimeout(scanForSubtitles, 20000);
+    return;
+  }
   
   allElements.forEach(el => {
     // Пропускаем элементы без текста или слишком маленькие/большие
@@ -607,9 +573,6 @@ function scanForSubtitles() {
       if (text.split(' ').length >= 2 && // минимум 2 слова
           /[a-zA-Zа-яА-Я]{3,}/.test(text)) { // минимум 3 буквы в слове
         
-        // Ограничиваем количество наблюдателей
-        if (observerCount > 100) return;
-        
         // Если это похоже на субтитры, наблюдаем за изменениями
         const observer = new MutationObserver((mutations) => {
           mutations.forEach(mutation => {
@@ -623,6 +586,7 @@ function scanForSubtitles() {
         });
         
         observerCount++;
+        newObservers++;
         
         // Начинаем наблюдение
         observer.observe(el, {
@@ -640,7 +604,7 @@ function scanForSubtitles() {
     }
   });
   
-  originalConsoleLog(`Aggressive scan complete. Found subtitles: ${foundSubtitles}, observers: ${observerCount}`);
+  originalConsoleLog(`Aggressive scan complete. Found subtitles: ${foundSubtitles}, new observers: ${newObservers}, total: ${observerCount}`);
   
   // Повторяем сканирование через 20 секунд
   setTimeout(scanForSubtitles, 20000);
