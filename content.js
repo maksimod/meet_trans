@@ -1,7 +1,30 @@
 // Google Meet Subtitles Logger
 // This script monitors Google Meet subtitle elements and logs them to the console
 
-console.log('Google Meet Subtitles Logger started');
+// Префикс для системных сообщений - позволяет отличать их от субтитров
+const SYSTEM_PREFIX = '🔧 SYSTEM: ';
+const SUBTITLE_PREFIX = '📝 Subtitles: ';
+
+// Заменяем стандартный console.log для системных сообщений
+const originalConsoleLog = console.log;
+console.log = function() {
+  // Если первый аргумент начинается с '📝 Subtitles:', то это субтитры - оставляем как есть
+  if (arguments[0] && typeof arguments[0] === 'string' && arguments[0].startsWith(SUBTITLE_PREFIX)) {
+    originalConsoleLog.apply(console, arguments);
+  } else {
+    // Для всех остальных сообщений добавляем префикс
+    const args = Array.from(arguments);
+    if (args[0] && typeof args[0] === 'string') {
+      args[0] = SYSTEM_PREFIX + args[0];
+    } else {
+      args.unshift(SYSTEM_PREFIX);
+    }
+    originalConsoleLog.apply(console, args);
+  }
+};
+
+// Теперь запускаем оригинальное сообщение
+originalConsoleLog('Google Meet Subtitles Logger started');
 
 // Track previously seen subtitles to avoid duplicates
 const seenSubtitles = new Set();
@@ -27,6 +50,29 @@ const UI_ELEMENTS = [
   'Cast', 'Other ways', 'Choose activity', 'speaker_', 'Join', 'Leave',
   'Now', 'have joined', 'allowed to', 'hand is', 'camera is', 'microphone is', 
   'desktop notifi', 'is here', 'participants', 'no one'
+];
+
+// Классы элементов, которые могут содержать субтитры
+const SUBTITLE_CLASSES = [
+  'CNusmb', 'VbkSUe', 'a4cQT', 'iOzk7', 'TBMuR', 'zTETae', 
+  'Mz6pEf', 'n2NWs', 'KvPUJb', 'iTTPOb', 'vdk1ce'
+];
+
+// Основные селекторы для субтитров Google Meet
+// Google Meet постоянно обновляется, поэтому эти селекторы могут меняться
+const SUBTITLE_SELECTORS = [
+  // Основные селекторы субтитров
+  '.CNusmb', '.VbkSUe', '.a4cQT', '[data-message-text]', 
+  '.iOzk7', '.TBMuR', '.zTETae', '.Mz6pEf', '.n2NWs',
+  // Дополнительные селекторы, которые были замечены
+  '.KvPUJb', '.iTTPOb',
+  // Транскрипция
+  '[data-identifier="live-caption"]',
+  // Транскрипции в боковой панели
+  '.vdk1ce',
+  // Элементы транскрипции с атрибутом роли
+  '[role="complementary"]',
+  '[role="log"]'
 ];
 
 // Проверка, является ли текст элементом интерфейса
@@ -147,26 +193,15 @@ function isRealSubtitle(text) {
   const words = text.split(/\s+/).filter(word => word.length > 0);
   if (words.length < 2) return false; // Субтитры обычно содержат хотя бы 2 слова
   
-  // Проверка на рациональное соотношение букв к не-буквам
+  // Проверка на рациональное соотношение букв к не-буквам - делаем более мягкую проверку
   const letters = text.match(/[a-zA-Zа-яА-Я]/g) || [];
   const nonLetters = text.match(/[^a-zA-Zа-яА-Я\s]/g) || [];
-  if (letters.length === 0 || nonLetters.length / letters.length > 0.5) {
-    return false;
-  }
-  
-  // Если текст очень длинный и не содержит знаков пунктуации, вероятно это не субтитры
-  if (text.length > 100 && !(/[.!?,;:]/).test(text)) {
+  if (letters.length === 0 || nonLetters.length / (letters.length + 1) > 0.7) {
     return false;
   }
   
   return true;
 }
-
-// Классы элементов, которые могут содержать субтитры
-const SUBTITLE_CLASSES = [
-  'CNusmb', 'VbkSUe', 'a4cQT', 'iOzk7', 'TBMuR', 'zTETae', 
-  'Mz6pEf', 'n2NWs', 'KvPUJb', 'iTTPOb', 'vdk1ce'
-];
 
 // Process subtitle text
 function processSubtitleText(text) {
@@ -181,19 +216,28 @@ function processSubtitleText(text) {
   // Проверяем, реальные ли это субтитры
   if (!isRealSubtitle(cleanText)) return;
   
+  // Проверяем, если это полный дубликат последнего субтитра - пропускаем
+  if (cleanText === lastSubtitle) return;
+  
   // Разделяем текст на предложения
   const sentences = splitIntoSentences(cleanText);
   
   const now = Date.now();
+  let hasNewSentences = false;
   
   // Обрабатываем каждое предложение отдельно
   for (const sentence of sentences) {
     // Если предложение слишком короткое или уже выводилось - пропускаем
     if (sentence.length < MIN_LENGTH || seenSubtitles.has(sentence)) continue;
     
-    console.log('📝 Subtitles:', sentence);
+    hasNewSentences = true;
+    originalConsoleLog(SUBTITLE_PREFIX + sentence);
     seenSubtitles.add(sentence);
-    lastSubtitle = sentence;
+  }
+  
+  // Обновляем последний субтитр только если был хотя бы один новый
+  if (hasNewSentences) {
+    lastSubtitle = cleanText;
     lastLogTime = now;
   }
   
@@ -207,23 +251,36 @@ function processSubtitleText(text) {
 
 // Разделяет текст на предложения
 function splitIntoSentences(text) {
-  // Используем регулярное выражение для разделения по знакам окончания предложения,
-  // но сохраняем сами знаки в результате
-  const sentencesArray = [];
-  const sentencesRaw = text.split(/([.!?;]+)/);
+  // Используем регулярное выражение для разделения по знакам окончания предложения
+  const sentences = [];
   
-  // Собираем предложения с их знаками пунктуации
-  for (let i = 0; i < sentencesRaw.length - 1; i += 2) {
-    const sentenceText = sentencesRaw[i].trim();
-    const punctuation = sentencesRaw[i+1] || '';
+  // Разбираем текст на части по знакам препинания (учитываем и русские, и английские знаки)
+  const regex = /[.!?;]+/g;
+  let match;
+  let lastIndex = 0;
+  
+  // Находим все разделители предложений
+  while ((match = regex.exec(text)) !== null) {
+    const sentence = text.substring(lastIndex, match.index + match[0].length).trim();
     
-    if (sentenceText) {
-      sentencesArray.push(sentenceText + punctuation);
+    // Добавляем только если предложение не пустое
+    if (sentence && sentence.length >= MIN_LENGTH) {
+      sentences.push(sentence);
+    }
+    
+    lastIndex = match.index + match[0].length;
+  }
+  
+  // Добавляем последнюю часть текста, если она есть
+  if (lastIndex < text.length) {
+    const remainingText = text.substring(lastIndex).trim();
+    if (remainingText && remainingText.length >= MIN_LENGTH) {
+      sentences.push(remainingText);
     }
   }
   
   // Если после разделения нет предложений, возвращаем исходный текст как одно предложение
-  return sentencesArray.length > 0 ? sentencesArray : [text];
+  return sentences.length > 0 ? sentences : [text];
 }
 
 // Очистка старых субтитров периодически
@@ -237,7 +294,7 @@ setInterval(() => {
 
 // Function to observe subtitles
 function observeSubtitles() {
-  console.log('Starting subtitle observation');
+  originalConsoleLog('Starting subtitle observation');
   
   // The main container where subtitles appear in Google Meet
   const targetNode = document.body;
@@ -248,23 +305,6 @@ function observeSubtitles() {
     subtree: true, 
     characterData: true
   };
-  
-  // Основные селекторы для субтитров Google Meet
-  // Google Meet постоянно обновляется, поэтому эти селекторы могут меняться
-  const SUBTITLE_SELECTORS = [
-    // Основные селекторы субтитров
-    '.CNusmb', '.VbkSUe', '.a4cQT', '[data-message-text]', 
-    '.iOzk7', '.TBMuR', '.zTETae', '.Mz6pEf', '.n2NWs',
-    // Дополнительные селекторы, которые были замечены
-    '.KvPUJb', '.iTTPOb',
-    // Транскрипция
-    '[data-identifier="live-caption"]',
-    // Транскрипции в боковой панели
-    '.vdk1ce',
-    // Элементы транскрипции с атрибутом роли
-    '[role="complementary"]',
-    '[role="log"]'
-  ];
   
   // Callback to execute when mutations are observed
   const callback = function(mutationsList, observer) {
@@ -300,14 +340,10 @@ function observeSubtitles() {
           }
         });
         
-        // Сортируем по длине - обычно самый длинный текст это полная фраза
-        candidateTexts.sort((a, b) => b.length - a.length);
-        
-        // Обрабатываем только самый длинный текст, который является настоящим субтитром
+        // Обрабатываем все тексты, а не только самый длинный
         for (const text of candidateTexts) {
           if (isRealSubtitle(text)) {
             processSubtitleText(text);
-            break;
           }
         }
       }
@@ -324,7 +360,7 @@ function observeSubtitles() {
   // Start observing the target node for configured mutations
   observer.observe(targetNode, config);
   
-  console.log('Subtitle observer started');
+  originalConsoleLog('Subtitle observer started');
   
   // Backup check with reduced frequency (every 1.5 seconds)
   setInterval(() => {
@@ -345,14 +381,10 @@ function observeSubtitles() {
           }
         });
         
-        // Сортируем по длине
-        candidateTexts.sort((a, b) => b.length - a.length);
-        
-        // Обрабатываем только самый длинный текст, который является настоящим субтитром
+        // Обрабатываем все тексты, а не только самый длинный
         for (const text of candidateTexts) {
           if (isRealSubtitle(text)) {
             processSubtitleText(text);
-            break;
           }
         }
       }
@@ -366,7 +398,7 @@ function observeSubtitles() {
 
 // Fallback function to try multiple methods of finding subtitles
 function findSubtitlesWithDeepScan() {
-  console.log('Performing deep scan for subtitle elements');
+  originalConsoleLog('Performing deep scan for subtitle elements');
   
   // Look for elements with specific text patterns that might be subtitles
   document.querySelectorAll('div, span, p').forEach(el => {
@@ -468,7 +500,7 @@ function detectGoogleMeet() {
   const meetLoaded = meetElements.some(selector => document.querySelector(selector));
   
   if (meetLoaded) {
-    console.log('Google Meet interface detected');
+    originalConsoleLog('Google Meet interface detected');
     observeSubtitles();
     setTimeout(findSubtitlesWithDeepScan, 5000); // Try deep scan after 5 seconds
     return true;
@@ -479,7 +511,7 @@ function detectGoogleMeet() {
 
 // Initial check on page load
 window.addEventListener('load', () => {
-  console.log('Page loaded, waiting for Google Meet interface...');
+  originalConsoleLog('Page loaded, waiting for Google Meet interface...');
   
   // Try to detect Google Meet interface immediately
   if (!detectGoogleMeet()) {
@@ -493,7 +525,7 @@ window.addEventListener('load', () => {
     // Safety timeout to clear interval after 60 seconds
     setTimeout(() => {
       clearInterval(detectInterval);
-      console.log('Timed out waiting for Google Meet interface. Starting observers anyway.');
+      originalConsoleLog('Timed out waiting for Google Meet interface. Starting observers anyway.');
       observeSubtitles();
       findSubtitlesWithDeepScan();
     }, 60000);
