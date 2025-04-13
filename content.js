@@ -7,14 +7,17 @@ const SUBTITLE_PREFIX = '📝 ';
 
 // Constants for logging
 const DEBUG_PREFIX = '[DEBUG] ';
-const MAX_DEBUG_MESSAGES = 15; // Maximum number of debug messages to show
+const MAX_DEBUG_MESSAGES = 5; // Reduce from 15 to 5 maximum debug messages
 const DEBUG_INTERVAL_MS = 1000; // Minimum time between debug messages in ms
+const ENABLE_SYSTEM_MESSAGES = false; // Disable most system messages
 
 // Заменяем стандартный console.log для системных сообщений
 const originalConsoleLog = console.log;
 
-// Custom console.log for filtering debug messages
+// Custom console.log for filtering system messages
 const consoleLog = function() {
+  if (!ENABLE_SYSTEM_MESSAGES) return; // Skip system messages if disabled
+  
   debugMessageCount++;
   if (debugMessageCount < MAX_DEBUG_MESSAGES) {
     originalConsoleLog.apply(console, arguments);
@@ -58,8 +61,10 @@ function limitedDebugLog() {
     }
 }
 
-// Теперь запускаем оригинальное сообщение
-originalConsoleLog('Google Meet Subtitles Logger started');
+// Теперь запускаем оригинальное сообщение только если включены системные сообщения
+if (ENABLE_SYSTEM_MESSAGES) {
+  originalConsoleLog('Google Meet Subtitles Logger started');
+}
 
 // Track previously seen subtitles to avoid duplicates
 let seenSubtitles = new Set();
@@ -482,7 +487,7 @@ function processSubtitleText(text, forceSimilar = false) {
     
     // Debug message for subtitle processing
     debugMessageCount++;
-    if (debugMessageCount < MAX_DEBUG_MESSAGES) {
+    if (debugMessageCount < MAX_DEBUG_MESSAGES && ENABLE_SYSTEM_MESSAGES) {
         debug(`Обработка субтитров: "${text}"`);
     }
     
@@ -530,8 +535,14 @@ function processSubtitleText(text, forceSimilar = false) {
         lastSubtitleTime = now;
         lastSubtitle = text;
         
-        // Выводим субтитры
-        console.log(SUBTITLE_PREFIX + text);
+        // Разделяем текст на предложения и выводим их по отдельности
+        const sentences = splitIntoSentences(text);
+        for (const sentence of sentences) {
+            if (sentence.length >= MIN_LENGTH) {
+                // Выводим субтитры
+                console.log(SUBTITLE_PREFIX + sentence);
+            }
+        }
     } finally {
         // Сбрасываем флаг обработки
         isProcessing = false;
@@ -540,19 +551,27 @@ function processSubtitleText(text, forceSimilar = false) {
 
 // Разделяет текст на предложения по знакам окончания
 function splitIntoSentences(text) {
+  // Если текст пустой, возвращаем пустой массив
+  if (!text || text.trim() === '') return [];
+  
+  // Нормализуем пробелы и переносы строк
+  const normalizedText = text.replace(/\s+/g, ' ').trim();
+  
   // Используем регулярное выражение для разделения по знакам окончания предложения
+  // Включаем не только обычные знаки окончания, но и многоточие
   const sentences = [];
   
   // Разбираем текст на части по знакам препинания
-  const regex = /[.!?;]+/g;
+  // Улучшенное регулярное выражение для обнаружения окончаний предложений
+  const regex = /[.!?;…]+(?:\s+|$)/g;
   let match;
   let lastIndex = 0;
   
   // Находим все разделители предложений
-  while ((match = regex.exec(text)) !== null) {
-    const sentence = text.substring(lastIndex, match.index + match[0].length).trim();
+  while ((match = regex.exec(normalizedText)) !== null) {
+    const sentence = normalizedText.substring(lastIndex, match.index + match[0].length).trim();
     
-    // Добавляем только если предложение не пустое
+    // Добавляем только если предложение не пустое и достаточно длинное
     if (sentence && sentence.length >= MIN_LENGTH) {
       sentences.push(sentence);
     }
@@ -561,20 +580,34 @@ function splitIntoSentences(text) {
   }
   
   // Добавляем последнюю часть текста, если она есть
-  if (lastIndex < text.length) {
-    const remainingText = text.substring(lastIndex).trim();
+  if (lastIndex < normalizedText.length) {
+    const remainingText = normalizedText.substring(lastIndex).trim();
     if (remainingText && remainingText.length >= MIN_LENGTH) {
       sentences.push(remainingText);
     }
   }
   
-  // Если после разделения нет предложений, возвращаем исходный текст
-  return sentences.length > 0 ? sentences : [text];
+  // Если длинный текст не был разделен, но содержит запятые или другие разделители,
+  // попробуем разделить по ним для улучшения читаемости
+  if (sentences.length === 1 && sentences[0].length > 80) {
+    const longSentence = sentences[0];
+    
+    // Пробуем разделить по запятым или тире
+    const parts = longSentence.split(/[,\-—–]+\s+/);
+    if (parts.length > 1) {
+      return parts.filter(part => part.trim().length >= MIN_LENGTH).map(part => part.trim());
+    }
+  }
+  
+  // Если после разделения нет предложений, возвращаем исходный текст как одно предложение
+  return sentences.length > 0 ? sentences : (text.trim() ? [text.trim()] : []);
 }
 
 // Функция очистки неактивных наблюдателей
 function cleanupInactiveObservers() {
-  originalConsoleLog(`Cleaning up observers: ${activeObservers.size} active observers`);
+  if (ENABLE_SYSTEM_MESSAGES) {
+    originalConsoleLog(`Cleaning up observers: ${activeObservers.size} active observers`);
+  }
   
   // Вместо полной очистки, оставляем основного наблюдателя
   for (const observer of activeObservers) {
@@ -590,12 +623,16 @@ function cleanupInactiveObservers() {
   }
   activeObservers = newObservers;
   
-  originalConsoleLog(`After cleanup: ${activeObservers.size} active observers`);
+  if (ENABLE_SYSTEM_MESSAGES) {
+    originalConsoleLog(`After cleanup: ${activeObservers.size} active observers`);
+  }
 }
 
 // Функция перезапуска наблюдателей
 function restartObservers() {
-  originalConsoleLog('Restarting subtitle observers');
+  if (ENABLE_SYSTEM_MESSAGES) {
+    originalConsoleLog('Restarting subtitle observers');
+  }
   
   // Фиксируем флаг обработки, чтобы избежать блокировок
   isProcessing = false;
@@ -613,10 +650,12 @@ function restartObservers() {
   setTimeout(findSubtitlesWithDeepScan, 2000);
   setTimeout(scanForSubtitles, 5000);
   
-  originalConsoleLog('Observers restarted successfully');
+  if (ENABLE_SYSTEM_MESSAGES) {
+    originalConsoleLog('Observers restarted successfully');
+  }
 }
 
-// Очистка старых субтитров периодически
+// Периодически проверяем, не прекратилось ли обнаружение субтитров
 setInterval(() => {
   if (seenSubtitles.size > 30) {
     const recent = Array.from(seenSubtitles).slice(-20);
@@ -627,7 +666,9 @@ setInterval(() => {
   // Проверяем, не прекратилось ли обнаружение субтитров
   const now = Date.now();
   if (now - lastSubtitleTime > 30000) {
-    originalConsoleLog('No subtitles detected for a while, restarting observers...');
+    if (ENABLE_SYSTEM_MESSAGES) {
+      originalConsoleLog('No subtitles detected for a while, restarting observers...');
+    }
     restartObservers();
     lastSubtitleTime = now; // Сбрасываем таймер, чтобы избежать слишком частых перезапусков
   }
@@ -638,7 +679,9 @@ setInterval(restartObservers, 15000);
 
 // Function to observe subtitles
 function observeSubtitles() {
-  originalConsoleLog('Starting subtitle observation');
+  if (ENABLE_SYSTEM_MESSAGES) {
+    originalConsoleLog('Starting subtitle observation');
+  }
   
   // The main container where subtitles appear in Google Meet
   const targetNode = document.body;
@@ -721,7 +764,9 @@ function observeSubtitles() {
     activeObservers.add(mainObserver);
   }
   
-  originalConsoleLog('Subtitle observer started');
+  if (ENABLE_SYSTEM_MESSAGES) {
+    originalConsoleLog('Subtitle observer started');
+  }
   
   // Backup check with reduced frequency
   const intervalID = setInterval(() => {
@@ -768,7 +813,9 @@ function observeSubtitles() {
 
 // Fallback function to try multiple methods of finding subtitles
 function findSubtitlesWithDeepScan() {
-  originalConsoleLog('Performing deep scan for subtitle elements');
+  if (ENABLE_SYSTEM_MESSAGES) {
+    originalConsoleLog('Performing deep scan for subtitle elements');
+  }
   
   // Первая стратегия: найти ближайший к нижнему краю экрана элемент с текстом
   // Это наиболее вероятное положение субтитров
@@ -796,7 +843,7 @@ function findSubtitlesWithDeepScan() {
   bottomPositionedElements.sort((a, b) => b.y - a.y);
   
   // Если у нас есть элементы в нижней части экрана, обрабатываем самые нижние
-  if (bottomPositionedElements.length > 0) {
+  if (bottomPositionedElements.length > 0 && ENABLE_SYSTEM_MESSAGES) {
     originalConsoleLog(`Found ${bottomPositionedElements.length} elements positioned at the bottom of the screen`);
     
     // Берем 5 самых нижних элементов
@@ -806,8 +853,18 @@ function findSubtitlesWithDeepScan() {
     for (const item of probableSubtitles) {
       // Проверяем текст на соответствие субтитрам
       if (!isUIElement(item.text)) {
-        originalConsoleLog(`Found bottom-positioned element with text: "${item.text.substring(0, 30)}..."`);
-        processSubtitleText(item.text);
+        if (ENABLE_SYSTEM_MESSAGES) {
+          originalConsoleLog(`Found bottom-positioned element with text: "${item.text.substring(0, 30)}..."`);
+        }
+        
+        // Обрабатываем текст, разбивая его на предложения
+        const sentences = splitIntoSentences(item.text);
+        for (const sentence of sentences) {
+          if (sentence.length >= MIN_LENGTH) {
+            originalConsoleLog(SUBTITLE_PREFIX + sentence);
+          }
+        }
+        lastSubtitleTime = Date.now();
         
         // Наблюдаем за этим элементом для обнаружения изменений
         const observer = new MutationObserver((mutations) => {
@@ -846,7 +903,9 @@ function findSubtitlesWithDeepScan() {
     );
     
     if (isSubtitleStyled && text && text.length > MIN_LENGTH && !isUIElement(text)) {
-      originalConsoleLog(`Found element with subtitle-like styling: "${text.substring(0, 30)}..."`);
+      if (ENABLE_SYSTEM_MESSAGES) {
+        originalConsoleLog(`Found element with subtitle-like styling: "${text.substring(0, 30)}..."`);
+      }
       processSubtitleText(text);
       
       // Наблюдаем за изменениями
@@ -882,7 +941,9 @@ function findSubtitlesWithDeepScan() {
                  el.getAttribute('data-spotlight-subtitle');
     
     if (text && text.length > MIN_LENGTH && !isUIElement(text)) {
-      originalConsoleLog(`Found element with subtitle data attribute: "${text.substring(0, 30)}..."`);
+      if (ENABLE_SYSTEM_MESSAGES) {
+        originalConsoleLog(`Found element with subtitle data attribute: "${text.substring(0, 30)}..."`);
+      }
       processSubtitleText(text);
       
       // Наблюдаем за атрибутами и содержимым
@@ -930,7 +991,9 @@ function findSubtitlesWithDeepScan() {
       return text && text.length > MIN_LENGTH && text.length < 300;
     });
   
-  originalConsoleLog(`Deep scan found ${textElements.length} potential text elements`);
+  if (ENABLE_SYSTEM_MESSAGES) {
+    originalConsoleLog(`Deep scan found ${textElements.length} potential text elements`);
+  }
   
   // Examine each element for subtitle-like characteristics
   for (const el of textElements) {
@@ -985,7 +1048,9 @@ function findSubtitlesWithDeepScan() {
 function scanForSubtitles() {
   // Сканируем все div элементы на странице, которые могут содержать текст
   const allElements = document.querySelectorAll('div, span, p');
-  originalConsoleLog(`Scanning ${allElements.length} elements for subtitles...`);
+  if (ENABLE_SYSTEM_MESSAGES) {
+    originalConsoleLog(`Scanning ${allElements.length} elements for subtitles...`);
+  }
   
   let foundSubtitles = false;
   let observerCount = 0;
@@ -1043,11 +1108,15 @@ function scanForSubtitles() {
     }
   });
   
-  originalConsoleLog(`Aggressive scan complete. Found subtitles: ${foundSubtitles}, observers: ${observerCount}`);
+  if (ENABLE_SYSTEM_MESSAGES) {
+    originalConsoleLog(`Aggressive scan complete. Found subtitles: ${foundSubtitles}, observers: ${observerCount}`);
+  }
   
   // Проверяем, не создаем ли мы слишком много наблюдателей
   if (activeObservers.size > 300) {
-    originalConsoleLog('Too many observers, cleaning up...');
+    if (ENABLE_SYSTEM_MESSAGES) {
+      originalConsoleLog('Too many observers, cleaning up...');
+    }
     cleanupInactiveObservers();
     setTimeout(scanForSubtitles, 1000); // Сразу пересканируем после очистки
   } else {
@@ -1128,7 +1197,9 @@ function captureSubtitlesFromVideoElement() {
 
 // Функция для прямого захвата субтитров Google Meet
 function directCaptureSubtitles() {
-  originalConsoleLog('Attempting direct capture of Google Meet subtitles');
+  if (ENABLE_SYSTEM_MESSAGES) {
+    originalConsoleLog('Attempting direct capture of Google Meet subtitles');
+  }
   
   // Приоритетные селекторы для главного контейнера субтитров внизу экрана
   // Эти селекторы нацелены на самые распространенные элементы субтитров
@@ -1151,13 +1222,19 @@ function directCaptureSubtitles() {
         // Обрабатываем текущий текст
         const text = container.textContent?.trim();
         if (text && text.length > MIN_LENGTH) {
-          // Форсируем вывод текста как субтитра, пропуская большинство проверок
-          originalConsoleLog(SUBTITLE_PREFIX + text);
-          
-          // Обновляем время последнего субтитра
-          lastSubtitleTime = Date.now();
-          lastSubtitle = text;
-          seenSubtitles.add(text);
+          // Разделяем текст на предложения и выводим их
+          const sentences = splitIntoSentences(text);
+          for (const sentence of sentences) {
+            if (sentence.length >= MIN_LENGTH) {
+              // Форсируем вывод текста как субтитра, пропуская большинство проверок
+              originalConsoleLog(SUBTITLE_PREFIX + sentence);
+              
+              // Обновляем время последнего субтитра
+              lastSubtitleTime = Date.now();
+              lastSubtitle = sentence;
+              seenSubtitles.add(sentence);
+            }
+          }
           
           // Создаем специальный наблюдатель с высоким приоритетом
           const priorityObserver = new MutationObserver((mutations) => {
@@ -1167,12 +1244,18 @@ function directCaptureSubtitles() {
                 
                 // Проверяем, изменился ли текст и не пустой ли он
                 if (newText && newText !== text && newText.length > MIN_LENGTH) {
-                  // Прямой вывод в консоль, минуя проверки на дубликаты
-                  // для важнейших контейнеров субтитров
-                  originalConsoleLog(SUBTITLE_PREFIX + newText);
-                  lastSubtitleTime = Date.now();
-                  lastSubtitle = newText;
-                  seenSubtitles.add(newText);
+                  // Разделяем текст на предложения и выводим их
+                  const sentences = splitIntoSentences(newText);
+                  for (const sentence of sentences) {
+                    if (sentence.length >= MIN_LENGTH) {
+                      // Прямой вывод в консоль, минуя проверки на дубликаты
+                      // для важнейших контейнеров субтитров
+                      originalConsoleLog(SUBTITLE_PREFIX + sentence);
+                      lastSubtitleTime = Date.now();
+                      lastSubtitle = sentence;
+                      seenSubtitles.add(sentence);
+                    }
+                  }
                 }
               }
             }
@@ -1233,11 +1316,18 @@ function directCaptureSubtitles() {
             if (mutation.type === 'characterData' || mutation.type === 'childList') {
               const currentText = container.textContent?.trim();
               if (currentText && currentText.length > MIN_LENGTH && !isUIElement(currentText)) {
-                // Прямая обработка текста субтитров
-                processSubtitleText(currentText);
-                
-                // Обновляем метку времени последнего субтитра
-                lastSubtitleTime = Date.now();
+                // Разделяем текст на предложения и выводим их
+                const sentences = splitIntoSentences(currentText);
+                for (const sentence of sentences) {
+                  if (sentence.length >= MIN_LENGTH) {
+                    // Прямой вывод в консоль, минуя проверки на дубликаты
+                    // для важнейших контейнеров субтитров
+                    originalConsoleLog(SUBTITLE_PREFIX + sentence);
+                    lastSubtitleTime = Date.now();
+                    lastSubtitle = sentence;
+                    seenSubtitles.add(sentence);
+                  }
+                }
               }
             }
           }
@@ -1381,8 +1471,14 @@ function findSpeechLikeText() {
           lowerText.endsWith(" " + indicator) ||
           lowerText.includes(" " + indicator + " ")) {
         
-        // Это похоже на речь, выводим напрямую
-        originalConsoleLog(SUBTITLE_PREFIX + text);
+        // Это похоже на речь, выводим напрямую, но разделяем на предложения
+        const sentences = splitIntoSentences(text);
+        for (const sentence of sentences) {
+          if (sentence.length >= MIN_LENGTH) {
+            originalConsoleLog(SUBTITLE_PREFIX + sentence);
+          }
+        }
+        
         lastSubtitleTime = Date.now();
         seenSubtitles.add(text);
         
@@ -1390,7 +1486,13 @@ function findSpeechLikeText() {
         const speechObserver = new MutationObserver(() => {
           const newText = element.textContent?.trim();
           if (newText && newText !== text && newText.length > 2) {
-            originalConsoleLog(SUBTITLE_PREFIX + newText);
+            // Разделяем текст на предложения
+            const sentences = splitIntoSentences(newText);
+            for (const sentence of sentences) {
+              if (sentence.length >= MIN_LENGTH) {
+                originalConsoleLog(SUBTITLE_PREFIX + sentence);
+              }
+            }
             lastSubtitleTime = Date.now();
             seenSubtitles.add(newText);
           }
@@ -1412,7 +1514,7 @@ function findSpeechLikeText() {
 // Функция форсированного восстановления субтитров
 function forceSubtitleRecovery() {
   // Ограничиваем отладочное сообщение, чтобы уменьшить вывод в консоль
-  if (debugMessageCount < MAX_DEBUG_MESSAGES) {
+  if (debugMessageCount < MAX_DEBUG_MESSAGES && ENABLE_SYSTEM_MESSAGES) {
     limitedDebugLog('Performing forced subtitle recovery');
   }
   
@@ -1421,7 +1523,9 @@ function forceSubtitleRecovery() {
   const timeSinceLastSubtitle = now - lastSubtitleTime;
   
   if (timeSinceLastSubtitle > 10000) { // Если более 10 секунд нет субтитров
-    originalConsoleLog(`No subtitles for ${timeSinceLastSubtitle}ms, forcing recovery`);
+    if (ENABLE_SYSTEM_MESSAGES) {
+      originalConsoleLog(`No subtitles for ${timeSinceLastSubtitle}ms, forcing recovery`);
+    }
     
     // 1. Очищаем список ранее виденных субтитров
     seenSubtitles.clear();
@@ -1470,7 +1574,9 @@ function detectGoogleMeet() {
   const meetLoaded = meetElements.some(selector => document.querySelector(selector));
   
   if (meetLoaded) {
-    originalConsoleLog('Google Meet interface detected');
+    if (ENABLE_SYSTEM_MESSAGES) {
+      originalConsoleLog('Google Meet interface detected');
+    }
     observeSubtitles();
     
     // Запускаем различные методы захвата субтитров с небольшой задержкой
@@ -1492,7 +1598,9 @@ function detectGoogleMeet() {
 
 // Initial check on page load
 window.addEventListener('load', () => {
-  originalConsoleLog('Page loaded, waiting for Google Meet interface...');
+  if (ENABLE_SYSTEM_MESSAGES) {
+    originalConsoleLog('Page loaded, waiting for Google Meet interface...');
+  }
   
   // Immediately start the observers instead of waiting for detection
   observeSubtitles();
@@ -1514,11 +1622,15 @@ window.addEventListener('load', () => {
     // Safety timeout to clear interval after 60 seconds
     setTimeout(() => {
       clearInterval(detectInterval);
-      originalConsoleLog('Timed out waiting for Google Meet interface.');
+      if (ENABLE_SYSTEM_MESSAGES) {
+        originalConsoleLog('Timed out waiting for Google Meet interface.');
+      }
       
       // Start regular restart timer and recovery
       setTimeout(() => {
-        originalConsoleLog('Starting regular restart timer');
+        if (ENABLE_SYSTEM_MESSAGES) {
+          originalConsoleLog('Starting regular restart timer');
+        }
         setInterval(restartObservers, 15000);
         setInterval(forceSubtitleRecovery, 15000);
       }, 5000);
